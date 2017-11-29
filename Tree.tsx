@@ -4,7 +4,7 @@ import ChevronDownIcon from '@sourcegraph/icons/lib/ChevronDown'
 import ChevronRightIcon from '@sourcegraph/icons/lib/ChevronRight'
 import * as H from 'history'
 import * as immutable from 'immutable'
-import { Dictionary, flatten, groupBy, partition } from 'lodash'
+import { Dictionary, flatten, groupBy, isEqual, partition } from 'lodash'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 import VisibilitySensor from 'react-visibility-sensor'
@@ -21,6 +21,10 @@ export interface Props extends Repo {
     selectedPath: string
 }
 
+interface State {
+    pathSplits: string[][]
+}
+
 const treePadding = (depth: number, directory: boolean) => ({
     paddingLeft: depth * 12 + (directory ? 0 : 12) + 12 + 'px',
     paddingRight: '16px',
@@ -35,17 +39,16 @@ function closeDirectory(store: TreeStore, dir: string): void {
     store.setState({ ...state, shownSubpaths: next, selectedPath: dir, selectedDir: dir })
 }
 
-export class Tree extends React.PureComponent<Props, {}> {
+export class Tree extends React.Component<Props, State> {
     public store: TreeStore
-    public pathSplits: string[][]
     private ref: HTMLDivElement | null
 
     constructor(props: Props) {
         super(props)
+        this.state = {
+            pathSplits: this.filterPaths(props.paths, props.selectedPath).map(path => path.split('/')),
+        }
         this.store = createTreeStore(props.selectedPath)
-
-        this.pathSplits = this.filterPaths(props.paths, props.selectedPath).map(path => path.split('/'))
-
         this.onKeyDown = this.onKeyDown.bind(this)
     }
 
@@ -196,7 +199,6 @@ export class Tree extends React.PureComponent<Props, {}> {
     }
 
     public componentWillReceiveProps(nextProps: Props): void {
-        this.pathSplits = this.filterPaths(nextProps.paths, nextProps.selectedPath).map(path => path.split('/'))
         if (this.props.selectedPath !== nextProps.selectedPath) {
             const selectedPath = nextProps.selectedPath
             let shownSubpaths = this.store.getValue().shownSubpaths
@@ -226,6 +228,11 @@ export class Tree extends React.PureComponent<Props, {}> {
                 }
             }, 250)
         }
+        if (!isEqual(this.props.paths, nextProps.paths) || this.props.selectedPath !== nextProps.selectedPath) {
+            this.setState({
+                pathSplits: this.filterPaths(nextProps.paths, nextProps.selectedPath).map(path => path.split('/')),
+            })
+        }
     }
 
     public elementInViewport(el: any): boolean {
@@ -245,7 +252,7 @@ export class Tree extends React.PureComponent<Props, {}> {
                     history={this.props.history}
                     repoPath={this.props.repoPath}
                     rev={this.props.rev}
-                    pathSplits={this.pathSplits}
+                    pathSplits={this.state.pathSplits}
                     store={this.store}
                     currSubpath=""
                 />
@@ -332,6 +339,9 @@ export class TreeLayer extends React.Component<TreeLayerProps, TreeLayerState> {
         }
         if (nextState.selectedDir === nextProps.currSubpath) {
             // is selecting in curr directory
+            return true
+        }
+        if (!isEqual(nextProps.pathSplits, this.props.pathSplits)) {
             return true
         }
 
@@ -452,28 +462,17 @@ export class LayerTile extends React.Component<TileProps, {}> {
         }
     }
 
-    public validTokenRange(props: TileProps): boolean {
-        if (props.selectedPath === '') {
-            return true
-        }
-        const token = props.selectedPath.split('/').pop()!
-        return token >= this.first && token <= this.last
-    }
-
     public shouldComponentUpdate(nextProps: TileProps): boolean {
-        const lastValid = this.validTokenRange(this.props)
-        const nextValid = this.validTokenRange(nextProps)
-        if (!lastValid && !nextValid) {
-            // short circuit
-            return false
-        }
-        if (isEqualOrAncestor(this.props.selectedDir, this.props.currSubpath) && lastValid) {
+        if (isEqualOrAncestor(this.props.selectedDir, this.props.currSubpath)) {
             return true
         }
-        if (nextProps.selectedDir === nextProps.currSubpath && this.validTokenRange(nextProps)) {
+        if (nextProps.selectedDir === nextProps.currSubpath) {
             return true
         }
-        if (getParentDir(nextProps.selectedDir) === nextProps.currSubpath && this.validTokenRange(nextProps)) {
+        if (getParentDir(nextProps.selectedDir) === nextProps.currSubpath) {
+            return true
+        }
+        if (!isEqual(nextProps.pathSplits, this.props.pathSplits)) {
             return true
         }
         return false
